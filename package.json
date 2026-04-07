@@ -1,0 +1,19 @@
+{
+  "name": "lark-claude-bot",
+  "version": "0.1.0",
+  "description": "Lark/Feishu bot powered by Claude Code with cron task scheduling",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.60.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  },
+  "license": "MIT"
+}

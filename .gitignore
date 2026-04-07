@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+data/*.json
+data/*.log
+data/chat_messages/
+data/chat_context/
+data/chat_logs/
+data/task_logs/
+data/memory/
+*.log
+.DS_Store
