@@ -1,10 +1,10 @@
-# lark-claude-bot 🤖
+# Marvin — Your Paranoid (but Brilliant) Lark Bot
 
-> *"Here I am, brain the size of a planet, and they ask me to answer Lark messages. Call that job satisfaction? Because I don't."* — Marvin
+> *"Here I am, brain the size of a planet, and they ask me to answer Lark messages. Call that job satisfaction? Because I don't."*
 
 [中文文档](./README.zh-CN.md)
 
-Turn [Claude Code](https://docs.anthropic.com/en/docs/claude-code) into a Lark/Feishu team assistant — with cron scheduling, multi-turn sessions, and built-in safety filters. Named after Marvin, the paranoid android from *The Hitchhiker's Guide to the Galaxy*: depressed, but terrifyingly competent.
+A Lark/Feishu bot framework powered by [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — with cron scheduling, multi-turn sessions, auto-diagnosis, and built-in safety filters. Named after the paranoid android from *The Hitchhiker's Guide to the Galaxy*: perpetually unimpressed, but terrifyingly competent.
 
 ```
                   ┌──────────────────────┐

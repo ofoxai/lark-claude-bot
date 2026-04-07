@@ -1,8 +1,8 @@
-# lark-claude-bot 🤖
+# Marvin — 你的偏执（但极其能干的）Lark 机器人
 
-> *"我的大脑有行星那么大，他们却让我回飞书消息。你管这叫工作成就感？反正我不觉得。"* — Marvin
+> *"我的大脑有行星那么大，他们却让我回飞书消息。你管这叫工作成就感？反正我不觉得。"*
 
-把 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 变成你的 Lark/飞书团队 AI 助手 — 支持定时任务调度、多轮对话、自动故障诊断和安全过滤。名字来自《银河系漫游指南》里的偏执机器人 Marvin：永远丧着脸，但能力强到可怕。
+基于 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 的 Lark/飞书 Bot 框架 — 支持定时任务调度、多轮对话、自动故障诊断和安全过滤。名字来自《银河系漫游指南》里的偏执机器人 Marvin：对一切都不屑一顾，但能力强到可怕。
 
 ```
                   ┌──────────────────────┐
