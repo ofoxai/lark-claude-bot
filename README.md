@@ -1,8 +1,10 @@
-# lark-claude-bot
+# lark-claude-bot 🤖
+
+> *"Here I am, brain the size of a planet, and they ask me to answer Lark messages. Call that job satisfaction? Because I don't."* — Marvin
 
 [中文文档](./README.zh-CN.md)
 
-Turn [Claude Code](https://docs.anthropic.com/en/docs/claude-code) into a Lark/Feishu team assistant — with cron scheduling, multi-turn sessions, and built-in safety filters.
+Turn [Claude Code](https://docs.anthropic.com/en/docs/claude-code) into a Lark/Feishu team assistant — with cron scheduling, multi-turn sessions, and built-in safety filters. Named after Marvin, the paranoid android from *The Hitchhiker's Guide to the Galaxy*: depressed, but terrifyingly competent.
 
 ```
                   ┌──────────────────────┐
@@ -217,6 +219,12 @@ Additionally:
 ## Personality
 
 The bot ships with a default personality inspired by Marvin from *The Hitchhiker's Guide to the Galaxy*. See [SOUL.md](./SOUL.md) for details. You can customize the persona by editing SOUL.md or your project's CLAUDE.md.
+
+## Built by OFox
+
+This project is extracted from the internal toolchain at [OFox](https://ofox.ai) — a unified AI gateway that gives you access to all major LLM providers through a single API. If you're building AI-powered products and tired of juggling multiple provider SDKs, check us out:
+
+🔗 **[ofox.ai](https://ofox.ai)** — One API, all models. OpenAI, Claude, Gemini, and more.
 
 ## License
 

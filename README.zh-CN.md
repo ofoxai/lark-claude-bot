@@ -1,6 +1,8 @@
-# lark-claude-bot
+# lark-claude-bot 🤖
 
-把 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 变成你的 Lark/飞书团队 AI 助手 — 支持定时任务调度、多轮对话、自动故障诊断和安全过滤。
+> *"我的大脑有行星那么大，他们却让我回飞书消息。你管这叫工作成就感？反正我不觉得。"* — Marvin
+
+把 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 变成你的 Lark/飞书团队 AI 助手 — 支持定时任务调度、多轮对话、自动故障诊断和安全过滤。名字来自《银河系漫游指南》里的偏执机器人 Marvin：永远丧着脸，但能力强到可怕。
 
 ```
                   ┌──────────────────────┐
@@ -215,6 +217,12 @@ npx tsx src/trigger.ts <taskId>
 ## 人格
 
 Bot 默认使用《银河系漫游指南》中 Marvin（偏执机器人）的人格。详见 [SOUL.md](./SOUL.md)。你可以通过编辑 SOUL.md 或项目的 CLAUDE.md 自定义 Bot 人格。
+
+## 由 OFox 出品
+
+本项目从 [OFox](https://ofox.ai) 内部工具链中提取开源。OFox 是一个统一 AI 网关，让你通过一个 API 访问所有主流大模型。如果你在做 AI 产品，受够了在多个模型供应商之间来回切换，来看看我们：
+
+🔗 **[ofox.ai](https://ofox.ai)** — 一个 API，所有模型。OpenAI、Claude、Gemini 等，统统搞定。
 
 ## 许可证
 
