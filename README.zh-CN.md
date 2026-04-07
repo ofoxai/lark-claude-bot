@@ -1,0 +1,210 @@
+# lark-claude-bot
+
+把 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 变成你的 Lark/飞书团队 AI 助手 — 支持定时任务调度、多轮对话、自动故障诊断和安全过滤。
+
+```
+Lark 消息 → WebSocket → Claude Code CLI → Lark 卡片回复
+                              ↕
+                         Cron 调度器
+                       (自主执行任务)
+```
+
+## 核心能力
+
+- **实时对话**：通过 Lark WebSocket 接收消息（无需公网 IP），调用 Claude Code 处理，返回 Markdown 富文本卡片
+- **多格式输入**：文本、富文本、图片、文件 — 自动下载并传递给 Claude
+- **会话连续性**：按群/私聊维护 Claude Code session（30 分钟 TTL），支持多轮对话
+- **定时任务调度**：在 `tasks.json` 中定义任务 + 标准 cron 表达式，Bot 自动执行并发送结构化报告
+- **自动诊断修复**：任务失败时触发诊断 Agent，分类故障原因并尝试自我修复
+- **安全过滤层**：自动过滤 API Key、Token、内部 ID、内网 IP，防止敏感信息泄露
+
+## 快速开始（Claude Code 一键配置）
+
+已经安装了 [Claude Code](https://docs.anthropic.com/en/docs/claude-code)？把下面这段话直接粘贴给它：
+
+```
+帮我克隆并配置 https://github.com/ofoxai/lark-claude-bot.git：
+
+1. 克隆仓库并进入目录
+2. 运行 npm install
+3. 复制 .env.example 为 .env
+4. 问我要 Lark App ID、App Secret 和 Encrypt Key，填入 .env
+5. 如果我还没有 Lark 应用，告诉我怎么创建（去 open.larksuite.com 或 open.feishu.cn，开启机器人能力，开启 WebSocket 模式，订阅 im.message.receive_v1 事件，添加权限：im:message、im:message.group_at_msg、im:resource、im:chat）
+6. 配置好后运行 npm run dev 启动机器人
+```
+
+Claude Code 会交互式引导你完成整个配置流程。
+
+## 手动配置
+
+### 前置条件
+
+- Node.js 20+
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) 已安装并完成认证
+- 一个 [Lark](https://open.larksuite.com/) / [飞书](https://open.feishu.cn/) 应用（需开启机器人和 WebSocket）
+
+### 步骤
+
+```bash
+git clone https://github.com/ofoxai/lark-claude-bot.git
+cd lark-claude-bot
+cp .env.example .env
+# 编辑 .env，填入 Lark 应用凭证
+npm install
+npm run dev
+```
+
+### 环境变量
+
+| 变量 | 必填 | 说明 |
+|------|------|------|
+| `LARK_APP_ID` | 是 | Lark 应用 ID |
+| `LARK_APP_SECRET` | 是 | Lark 应用 Secret |
+| `LARK_ENCRYPT_KEY` | 否 | 事件加密密钥 |
+| `BOT_NAME` | 否 | 机器人显示名称（默认 `Marvin`） |
+| `CLAUDE_CWD` | 否 | Claude Code 工作目录（默认项目根目录） |
+| `CLAUDE_TIMEOUT_MS` | 否 | Claude 执行超时，毫秒（默认 `600000`） |
+| `CLAUDE_MAX_TURNS` | 否 | 单次请求最大 turn 数（默认 `200`） |
+
+## 架构
+
+```
+src/
+├── main.ts          # 入口：WebSocket 连接 + 调度器启动
+├── config.ts        # 环境变量和路径配置
+├── handler.ts       # 消息路由和上下文组装
+├── claude.ts        # Claude Code CLI 封装（spawn、解析、重试）
+├── lark.ts          # Lark API：发送文本/卡片/图片/文件、Reaction
+├── scheduler.ts     # Cron 引擎：60秒 tick、表达式匹配、执行锁
+├── taskExecutor.ts  # 两阶段管道：执行 → 总结（+ 自动修复）
+├── taskCommands.ts  # 任务列表注入 Claude 上下文
+├── chatStore.ts     # JSONL 消息持久化（按群存储）
+├── memory.ts        # 对话历史 + 记忆更新指令
+├── safety.ts        # 输出过滤 + 审计日志
+├── trigger.ts       # CLI 工具：手动触发任务
+└── send.ts          # CLI 工具：手动发消息
+```
+
+### 消息处理流程
+
+```
+Lark WebSocket 事件
+    → 去重（内存 Set，上限 5000）
+    → 存储消息（按群 JSONL 文件）
+    → 群消息未 @机器人 → 跳过
+    → 下载图片/文件到 /tmp/
+    → 构建上下文：最近消息 + 任务列表 + 对话历史
+    → Claude Code CLI (--print --output-format json)
+    → 安全过滤（移除密钥、Token、ID、IP）
+    → 发送 Lark 卡片（自动分段，单卡上限 3500 字符）
+    → 卡片失败时降级为纯文本
+```
+
+### 任务执行流程
+
+```
+Cron tick（60秒）
+    → 匹配活跃任务与当前时间
+    → 应用抖动延迟（0~N 分钟）
+    → 通过 Claude Code 执行任务 prompt
+    → 超时 → 携带部分输出重试
+    → 失败 → 诊断 → 分类 → 尝试自动修复
+    → 生成总结报告（新 Claude session）
+    → 发送报告卡片到目标群
+```
+
+## 定时任务
+
+任务定义在 `data/tasks.json` 中：
+
+```json
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "daily-report",
+      "name": "每日报告",
+      "prompt": "生成今天的工作总结...",
+      "cron": "0 9 * * 1-5",
+      "jitterMinutes": 5,
+      "chatId": "oc_xxxx",
+      "chatName": "团队群",
+      "createdBy": "ou_xxxx",
+      "createdAt": "2026-01-01T00:00:00Z",
+      "updatedAt": "2026-01-01T00:00:00Z",
+      "status": "active",
+      "timeoutMs": 600000,
+      "maxRetries": 1
+    }
+  ]
+}
+```
+
+### Cron 格式
+
+标准 5 字段：`分 时 日 月 周`
+
+| 表达式 | 含义 |
+|--------|------|
+| `0 9 * * 1-5` | 工作日 9:00 |
+| `*/30 * * * *` | 每 30 分钟 |
+| `0 0 1 * *` | 每月 1 号零点 |
+
+### 任务管理
+
+Claude 可以直接管理任务 — 用户说"创建/修改/暂停一个任务"，Claude 会直接编辑 `tasks.json`。调度器每次 tick 都从磁盘重新读取，无需重启。
+
+手动触发：
+
+```bash
+npx tsx src/trigger.ts              # 列出所有任务
+npx tsx src/trigger.ts daily-report # 立即执行
+```
+
+## CLI 工具
+
+```bash
+# 发送消息到群
+npx tsx src/send.ts <chatId> "你好"           # 卡片模式
+npx tsx src/send.ts <chatId> "你好" text      # 纯文本模式
+
+# 手动触发定时任务
+npx tsx src/trigger.ts <taskId>
+```
+
+## 安全机制
+
+所有 Claude 输出经过 `safety.ts` 过滤后才发送到 Lark：
+
+| 模式 | 替换为 |
+|------|--------|
+| `sk-*`、`ghp_*`、`Bearer *` | `[API_KEY]`、`[GITHUB_TOKEN]`、`[TOKEN]` |
+| `ou_*`、`oc_*`、`om_*` | `[用户]`、`[群聊]`、`[消息]` |
+| 内网 IP（192.168.x、10.x、172.16-31.x） | `[内网IP]` |
+| 用户主目录路径 | `~/` |
+| 已知环境变量值 | `[变量名]` |
+
+此外：
+- 危险命令（`rm -rf /`、`sudo`、`DROP TABLE`、`curl | sh`）记录到 `data/audit.log`
+- 每次 Claude 调用都记录 prompt/output 摘要
+
+## Lark 应用配置
+
+1. 在 [Lark 开放平台](https://open.larksuite.com/) 或 [飞书开放平台](https://open.feishu.cn/) 创建应用
+2. 开启 **机器人** 能力
+3. 开启 **WebSocket** 模式（事件订阅 → 接收方式）
+4. 订阅事件：`im.message.receive_v1`
+5. 添加权限：
+   - `im:message` — 发送和接收消息
+   - `im:message.group_at_msg` — 接收群 @消息
+   - `im:resource` — 下载图片和文件
+   - `im:chat` — 获取群列表
+6. 将 App ID 和 App Secret 填入 `.env`
+
+## 人格
+
+Bot 默认使用《银河系漫游指南》中 Marvin（偏执机器人）的人格。详见 [SOUL.md](./SOUL.md)。你可以通过编辑 SOUL.md 或项目的 CLAUDE.md 自定义 Bot 人格。
+
+## 许可证
+
+[MIT](./LICENSE)

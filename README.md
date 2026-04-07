@@ -1,5 +1,7 @@
 # lark-claude-bot
 
+[中文文档](./README.zh-CN.md)
+
 Turn [Claude Code](https://docs.anthropic.com/en/docs/claude-code) into a Lark/Feishu team assistant — with cron scheduling, multi-turn sessions, and built-in safety filters.
 
 ```
