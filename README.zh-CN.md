@@ -3,10 +3,21 @@
 把 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 变成你的 Lark/飞书团队 AI 助手 — 支持定时任务调度、多轮对话、自动故障诊断和安全过滤。
 
 ```
-Lark 消息 → WebSocket → Claude Code CLI → Lark 卡片回复
-                              ↕
-                         Cron 调度器
-                       (自主执行任务)
+                  ┌──────────────────────┐
+                  │    Claude Code CLI   │
+                  └──┬───────────────┬───┘
+                     │               │
+              prompt │               │ result
+                     │               │
+  ┌──────────┐   ┌───┴───────────────┴───┐   ┌──────────┐
+  │   Lark   │──▶│       handler.ts      │──▶│   Lark   │
+  │ WebSocket│   └───────────────────────┘   │   Card   │
+  └──────────┘               ▲               └──────────┘
+                             │
+                    ┌────────┴────────┐
+                    │  Cron Scheduler │
+                    │   tasks.json    │
+                    └─────────────────┘
 ```
 
 ## 核心能力

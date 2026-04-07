@@ -5,10 +5,21 @@
 Turn [Claude Code](https://docs.anthropic.com/en/docs/claude-code) into a Lark/Feishu team assistant — with cron scheduling, multi-turn sessions, and built-in safety filters.
 
 ```
-Lark message → WebSocket → Claude Code CLI → Lark card reply
-                              ↕
-                        Cron scheduler
-                     (autonomous tasks)
+                  ┌──────────────────────┐
+                  │    Claude Code CLI   │
+                  └──┬───────────────┬───┘
+                     │               │
+              prompt │               │ result
+                     │               │
+  ┌──────────┐   ┌───┴───────────────┴───┐   ┌──────────┐
+  │   Lark   │──▶│       handler.ts      │──▶│   Lark   │
+  │ WebSocket│   └───────────────────────┘   │   Card   │
+  └──────────┘               ▲               └──────────┘
+                             │
+                    ┌────────┴────────┐
+                    │  Cron Scheduler │
+                    │   tasks.json    │
+                    └─────────────────┘
 ```
 
 ## What it does
