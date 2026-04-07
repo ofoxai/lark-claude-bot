@@ -18,7 +18,24 @@ Lark message → WebSocket → Claude Code CLI → Lark card reply
 - **Auto-diagnosis**: Failed tasks trigger a diagnostic agent that classifies failures and attempts self-repair
 - **Safety layer**: Filters API keys, tokens, internal IDs, and private IPs from all output before sending
 
-## Quick Start
+## Getting Started (One-Click with Claude Code)
+
+Already have [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed? Just paste this prompt:
+
+```
+Clone https://github.com/ofoxai/lark-claude-bot.git and set it up for me:
+
+1. Clone the repo and cd into it
+2. Run npm install
+3. Copy .env.example to .env
+4. Ask me for my Lark App ID, App Secret, and Encrypt Key, then fill them into .env
+5. Tell me how to create a Lark app if I don't have one yet (link to open.larksuite.com, enable Bot capability, enable WebSocket mode, subscribe to im.message.receive_v1, add scopes: im:message, im:message.group_at_msg, im:resource, im:chat)
+6. Once .env is configured, run npm run dev to start the bot
+```
+
+That's it — Claude Code will walk you through the entire setup interactively.
+
+## Manual Setup
 
 ### Prerequisites
 
@@ -26,7 +43,7 @@ Lark message → WebSocket → Claude Code CLI → Lark card reply
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated
 - A [Lark](https://open.larksuite.com/) / [Feishu](https://open.feishu.cn/) app with Bot and WebSocket capabilities
 
-### Setup
+### Steps
 
 ```bash
 git clone https://github.com/ofoxai/lark-claude-bot.git
