@@ -42,6 +42,8 @@ export const config = {
     cwd: process.env.CLAUDE_CWD || process.cwd(),
     defaultTimeoutMs: Number(process.env.CLAUDE_TIMEOUT_MS) || 600_000,
     defaultMaxTurns: Number(process.env.CLAUDE_MAX_TURNS) || 200,
+    startupTimeoutMs: Number(process.env.CLAUDE_STARTUP_TIMEOUT_MS) || 300_000,
+    idleTimeoutMs: Number(process.env.CLAUDE_IDLE_TIMEOUT_MS) || 3_600_000,
   },
   dataDir: resolve(__dirname, "../data"),
   memoryDir: resolve(__dirname, "../data/memory"),

@@ -1,13 +1,13 @@
 import * as lark from "@larksuiteoapi/node-sdk";
 import { config } from "./config.js";
-import { handleMessage } from "./handler.js";
+import { handleMessage, resumeInterruptedSessions } from "./handler.js";
 import { startScheduler, stopScheduler } from "./scheduler.js";
 
 /**
- * lark-claude-bot — Lark Bot (WebSocket 模式)
+ * lark-claude-bot — Lark Bot (WebSocket mode)
  *
- * 无需公网 IP，SDK 自动维持长连接。
- * 事件到达 → EventDispatcher 路由 → handleMessage 异步处理
+ * No public IP needed — SDK maintains a persistent connection.
+ * Events arrive → EventDispatcher routes → handleMessage processes async
  */
 
 const eventDispatcher = new lark.EventDispatcher({
@@ -40,10 +40,13 @@ function main() {
   wsClient.start({ eventDispatcher });
   console.log("[ws] Connecting to Lark WebSocket...");
 
-  // 启动定时任务调度器
+  // Start scheduled task scheduler
   startScheduler();
 
-  // 优雅退出
+  // Resume interrupted active sessions (delay 5s for WebSocket to be ready)
+  setTimeout(() => resumeInterruptedSessions(), 5000);
+
+  // Graceful shutdown
   const shutdown = () => {
     console.log("\n[shutdown] Stopping...");
     stopScheduler();

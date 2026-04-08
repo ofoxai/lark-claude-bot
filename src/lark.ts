@@ -2,7 +2,7 @@ import * as lark from "@larksuiteoapi/node-sdk";
 import fs from "fs";
 import { config } from "./config.js";
 
-// Lark Client — SDK 自动管理 token
+// Lark Client — SDK manages token automatically
 export const client = new lark.Client({
   appId: config.lark.appId,
   appSecret: config.lark.appSecret,
@@ -10,7 +10,7 @@ export const client = new lark.Client({
   loggerLevel: lark.LoggerLevel.info,
 });
 
-// ==================== 消息去重 ====================
+// ==================== Message dedup ====================
 const processedMsgIds = new Set<string>();
 const MAX_DEDUP = 5000;
 
@@ -24,14 +24,13 @@ export function isDuplicate(messageId: string): boolean {
   return false;
 }
 
-// ==================== 发消息 ====================
+// ==================== Send messages ====================
 
 export async function sendText(
   chatId: string,
   text: string,
   replyTo?: string
 ): Promise<void> {
-  // 长文本分段发送，第一段回复原消息，后续段主动发
   const MAX = 3800;
   const parts: string[] = [];
   let remaining = text;
@@ -40,7 +39,6 @@ export async function sendText(
       parts.push(remaining);
       break;
     }
-    // 在换行处分割
     let splitAt = remaining.lastIndexOf("\n", MAX);
     if (splitAt < MAX / 2) splitAt = MAX;
     parts.push(remaining.slice(0, splitAt));
@@ -66,7 +64,7 @@ export async function sendText(
   }
 }
 
-/** 统计 markdown 文本中的表格数量（连续 | 开头行算一个表格） */
+/** Count tables in markdown (consecutive lines starting with |) */
 function countTables(text: string): number {
   let count = 0;
   let inTable = false;
@@ -82,6 +80,68 @@ function countTables(text: string): number {
     }
   }
   return count;
+}
+
+/**
+ * Send an updatable progress card, returns message_id for subsequent patches
+ */
+export async function sendProgressCard(
+  chatId: string,
+  markdown: string,
+  replyTo?: string
+): Promise<string | undefined> {
+  const card = {
+    schema: "2.0",
+    config: { update_multi: true },
+    body: {
+      direction: "vertical",
+      elements: [{ tag: "markdown", content: markdown }],
+    },
+  };
+  const content = JSON.stringify(card);
+  try {
+    let resp;
+    if (replyTo) {
+      resp = await client.im.message.reply({
+        path: { message_id: replyTo },
+        data: { msg_type: "interactive", content },
+      });
+    } else {
+      resp = await client.im.message.create({
+        params: { receive_id_type: "chat_id" },
+        data: { receive_id: chatId, msg_type: "interactive", content },
+      });
+    }
+    return (resp?.data as Record<string, string> | undefined)?.message_id;
+  } catch (err) {
+    console.error("[lark] sendProgressCard failed:", (err as Error).message);
+    return undefined;
+  }
+}
+
+/**
+ * Update an existing progress card's content
+ */
+export async function updateProgressCard(
+  messageId: string,
+  markdown: string
+): Promise<void> {
+  const card = {
+    schema: "2.0",
+    config: { update_multi: true },
+    body: {
+      direction: "vertical",
+      elements: [{ tag: "markdown", content: markdown }],
+    },
+  };
+  try {
+    await client.im.message.patch({
+      path: { message_id: messageId },
+      data: { content: JSON.stringify(card) },
+    });
+  } catch (err) {
+    console.error("[lark] updateProgressCard failed:", (err as Error).message);
+  }
 }
 
 export async function sendCard(
@@ -107,9 +167,7 @@ export async function sendCard(
 
   const content = JSON.stringify(card);
 
-  // 长 markdown 分段，每段一张卡片
-  // 避免在表格、代码块中间切断
-  // 飞书卡片单张卡片表格数量上限约 5 个
+  // Split long markdown into segments to avoid card limits
   const MAX_CARD = 3500;
   const MAX_TABLES = 5;
   const segments: string[] = [];
@@ -120,20 +178,15 @@ export async function sendCard(
       segments.push(remaining);
       break;
     }
-    // 找一个安全的分割点：优先在空行（段落边界）处切割
-    // 同时确保分段后表格数不超限
     let splitAt = -1;
     const searchLimit = remaining.length > MAX_CARD ? MAX_CARD : remaining.length;
-    // 先找双换行（段落边界），最不容易切断结构
     const doubleNl = remaining.lastIndexOf("\n\n", searchLimit);
     if (doubleNl >= searchLimit / 3) {
-      splitAt = doubleNl + 1; // 保留一个换行在前段末尾
+      splitAt = doubleNl + 1;
     } else {
-      // 没有合适的段落边界，找单换行但跳过表格行（以 | 开头的行）
       let candidate = remaining.lastIndexOf("\n", searchLimit);
       while (candidate > searchLimit / 3) {
         const nextChar = remaining[candidate + 1];
-        // 如果下一行是表格行或分隔行，继续往前找
         if (nextChar === "|" || (nextChar === "-" && remaining[candidate + 2] === "-")) {
           candidate = remaining.lastIndexOf("\n", candidate - 1);
         } else {
@@ -146,7 +199,6 @@ export async function sendCard(
         splitAt = searchLimit;
       }
     }
-    // 如果分割后前段表格仍超限，在更早的段落边界处切割
     let candidate = remaining.slice(0, splitAt);
     while (countTables(candidate) > MAX_TABLES && splitAt > 0) {
       const earlier = remaining.lastIndexOf("\n\n", splitAt - 2);
@@ -166,7 +218,6 @@ export async function sendCard(
         elements: [{ tag: "markdown", content: segments[i] }],
       },
     };
-    // 只有第一段带标题
     if (i === 0 && title) {
       segCard.header = {
         title: { tag: "plain_text", content: title },
@@ -189,7 +240,6 @@ export async function sendCard(
       }
     } catch (err) {
       const e = err as Record<string, unknown>;
-      // 尝试提取 Lark API 的响应体
       const response = (e.response as Record<string, unknown>) || {};
       const respData = response.data || (e as Record<string, unknown>).data;
       const errorDetail = {
@@ -238,11 +288,11 @@ export async function removeReaction(
       path: { message_id: messageId, reaction_id: reactionId },
     });
   } catch {
-    // 静默
+    // silent
   }
 }
 
-// ==================== 图片/文件 ====================
+// ==================== Image / File ====================
 
 export async function uploadImage(imagePath: string): Promise<string> {
   const resp = await client.im.image.create({
@@ -316,7 +366,7 @@ export async function downloadResource(
   await resp.writeFile(savePath);
 }
 
-// ==================== 群列表 ====================
+// ==================== Chat list ====================
 
 export async function fetchChatList(): Promise<
   Array<{ chatId: string; name: string }>
@@ -333,4 +383,3 @@ export async function fetchChatList(): Promise<
   }
   return chats;
 }
-
