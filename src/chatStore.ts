@@ -23,7 +23,7 @@ export interface StoredMessage {
   senderType: string;
   msgType: string;
   content: string;
-  mentions?: Array<{ key: string; name: string }>;
+  mentions?: Array<{ key: string; name: string; id?: { open_id?: string } }>;
   timestamp: string;
   // 话题（Thread）
   rootId?: string;    // 话题根消息 ID
@@ -110,28 +110,131 @@ export function buildChatContext(chatId: string, limit = 20): string {
   const messages = getRecentMessages(chatId, limit);
   if (!messages.length) return "";
 
+  // 建立 messageId → 消息 的索引，用于渲染回复关系
+  const msgIndex = new Map<string, StoredMessage>();
+  for (const m of messages) msgIndex.set(m.messageId, m);
+
+  // 从所有消息的 mentions 里积累 open_id → name 映射
+  const nameMap = new Map<string, string>();
+  for (const m of messages) {
+    if (!m.mentions?.length) continue;
+    for (const mention of m.mentions) {
+      const openId = mention.id?.open_id;
+      if (openId && mention.name) nameMap.set(openId, mention.name);
+    }
+  }
+
+  // 记录原始窗口内的 messageId，用于后续判断回复目标是否在可见范围内
+  const windowIds = new Set(messages.map((m) => m.messageId));
+
+  // 如果被回复的消息不在最近 N 条里，额外加载更多来查找
+  const parentIdSet = new Set(
+    messages
+      .filter((m) => m.parentId && !msgIndex.has(m.parentId))
+      .map((m) => m.parentId!)
+  );
+  if (parentIdSet.size) {
+    const allMessages = getRecentMessages(chatId, 200);
+    for (const m of allMessages) {
+      if (parentIdSet.has(m.messageId) && !msgIndex.has(m.messageId)) {
+        msgIndex.set(m.messageId, m);
+      }
+      if (m.mentions?.length) {
+        for (const mention of m.mentions) {
+          const openId = mention.id?.open_id;
+          if (openId && mention.name) nameMap.set(openId, mention.name);
+        }
+      }
+    }
+  }
+
+  const senderName = (id: string): string => nameMap.get(id) || id.slice(0, 8);
+
   const lines = messages.map((m) => {
     const time = m.timestamp.slice(11, 16); // HH:MM
-    const sender = m.senderId.slice(0, 8);
+    const sender = senderName(m.senderId);
     const thread = m.rootId ? ` [话题:${m.rootId.slice(-8)}]` : "";
+
+    // 将 @_user_N 占位符替换为真实名字
+    const resolveMentions = (text: string): string => {
+      if (!m.mentions?.length) return text;
+      let result = text;
+      for (const mention of m.mentions) {
+        result = result.replace(new RegExp(mention.key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"), `@${mention.name}`);
+      }
+      return result;
+    };
+
+    // 如果是回复消息，附上被回复消息的摘要
+    let replyCtx = "";
+    if (m.parentId) {
+      const parent = msgIndex.get(m.parentId);
+      if (parent) {
+        const inWindow = windowIds.has(m.parentId!);
+        const previewLimit = inWindow ? 80 : 300;
+        let parentText = "";
+        let parentPreview = "";
+        try {
+          if (parent.msgType === "text") {
+            parentText = JSON.parse(parent.content).text || "";
+            parentPreview = parentText.slice(0, previewLimit);
+          } else if (parent.msgType === "post") {
+            const obj = JSON.parse(parent.content);
+            const parts: string[] = [];
+            if (obj.title) parts.push(obj.title);
+            for (const line of obj.content || []) {
+              if (!Array.isArray(line)) continue;
+              for (const item of line) {
+                if (item.tag === "text" && item.text) parts.push(item.text.trim());
+                else if (item.tag === "a" && item.text) parts.push(item.text.trim());
+              }
+            }
+            parentText = parts.join(" ");
+            parentPreview = parentText.slice(0, previewLimit);
+          }
+        } catch { /* ignore */ }
+        if (parentPreview) {
+          const ellipsis = parentText.length > previewLimit ? "…" : "";
+          replyCtx = ` [回复 ${senderName(parent.senderId)}: "${parentPreview}${ellipsis}"]`;
+        }
+      }
+    }
 
     switch (m.msgType) {
       case "text": {
         try {
-          const text = JSON.parse(m.content).text || "";
-          return `[${time}] ${sender}${thread}: ${text}`;
+          const raw = JSON.parse(m.content).text || "";
+          const text = resolveMentions(raw).slice(0, 200);
+          return `[${time}] ${sender}${thread}${replyCtx}: ${text}`;
         } catch {
-          return `[${time}] ${sender}${thread}: ${m.content}`;
+          return `[${time}] ${sender}${thread}${replyCtx}: ${m.content}`;
         }
       }
       case "image":
-        return `[${time}] ${sender}${thread}: [图片 image_key=${m.imageKey}]`;
+        return `[${time}] ${sender}${thread}${replyCtx}: [图片 image_key=${m.imageKey}]`;
       case "file":
-        return `[${time}] ${sender}${thread}: [文件 ${m.fileName || m.fileKey}]`;
-      case "post":
-        return `[${time}] ${sender}${thread}: [富文本消息]`;
+        return `[${time}] ${sender}${thread}${replyCtx}: [文件 ${m.fileName || m.fileKey}]`;
+      case "post": {
+        try {
+          const obj = JSON.parse(m.content);
+          const parts: string[] = [];
+          if (obj.title) parts.push(obj.title);
+          for (const line of obj.content || []) {
+            if (!Array.isArray(line)) continue;
+            for (const item of line) {
+              if (item.tag === "text" && item.text) parts.push(item.text.trim());
+              else if (item.tag === "a" && item.text) parts.push(item.text.trim());
+              else if (item.tag === "img" && item.image_key) parts.push(`[图片 image_key=${item.image_key}]`);
+            }
+          }
+          const text = resolveMentions(parts.join(" ").replace(/\s+/g, " ")).slice(0, 300);
+          return `[${time}] ${sender}${thread}${replyCtx}: ${text || "[富文本消息]"}`;
+        } catch {
+          return `[${time}] ${sender}${thread}${replyCtx}: [富文本消息]`;
+        }
+      }
       default:
-        return `[${time}] ${sender}${thread}: [${m.msgType}消息]`;
+        return `[${time}] ${sender}${thread}${replyCtx}: [${m.msgType}消息]`;
     }
   });
 

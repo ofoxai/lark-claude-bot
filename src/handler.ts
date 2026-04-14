@@ -228,6 +228,7 @@ interface ProgressContext {
   chatId: string;
   initialProgressMsgId?: string;
   replyToMsgId?: string;
+  taskTitle?: string;
 }
 
 interface ExecuteResult {
@@ -259,6 +260,9 @@ async function executeClaudeWithProgress(
 
   function buildProgressMarkdown(): string {
     const lines: string[] = [];
+    if (ctx.taskTitle) {
+      lines.push(`**${sanitizeOutput(ctx.taskTitle)}**\n`);
+    }
     if (currentTodos.length > 0) {
       for (const t of currentTodos) {
         const icon = t.status === "completed" ? "✅"
@@ -343,6 +347,7 @@ async function executeClaudeWithProgress(
   // Send final result
   if (progressMsgId) {
     try {
+      const titleSection = ctx.taskTitle ? `**${sanitizeOutput(ctx.taskTitle)}**\n\n` : "";
       const todoSection = currentTodos.length > 0
         ? currentTodos.map((t) => {
             const icon = t.status === "completed" ? "✅"
@@ -350,7 +355,7 @@ async function executeClaudeWithProgress(
             return `${icon} ${sanitizeOutput(t.content)}`;
           }).join("\n") + "\n\n"
         : "";
-      await updateProgressCard(progressMsgId, todoSection + reply);
+      await updateProgressCard(progressMsgId, titleSection + todoSection + reply);
     } catch {
       try { await sendCard(ctx.chatId, reply); } catch { /* give up */ }
     }
@@ -493,32 +498,53 @@ async function processMessage(
 
   try {
     const chatCtx = buildChatContext(chatId, 30);
-    const taskCtx = buildTaskContext(chatId);
+    const TASK_KEYWORDS = ["任务", "定时", "cron", "schedule", "提醒", "每天", "每周", "执行", "暂停", "删除", "立即", "停止", "新建", "创建", "修改", "更新"];
+    const hasTaskKeyword = TASK_KEYWORDS.some(kw => prompt.includes(kw));
 
     const parts: string[] = [];
+
+    // 1. 近期对话上下文
     if (chatCtx) parts.push(chatCtx);
-    if (taskCtx) parts.push(taskCtx);
-    parts.push(`用户消息：${prompt}`);
+
+    // 2. 当前需要处理的消息（重点标出）
+    parts.push(`## 当前消息（需要你处理）\n${prompt}`);
+
+    // 3. 按需附加：定时任务提示（关键词命中时注入，否则跳过）
+    if (hasTaskKeyword) {
+      const taskCtx = buildTaskContext(chatId);
+      if (taskCtx) parts.push(taskCtx);
+    }
+
+    // 4. 执行规范
+    parts.push(`## 执行规范\n- 执行后检查结果是否符合预期，如有报错或异常请自行排查并重试，不要直接把错误抛给用户\n- 操作完成后简洁回复结果，不要复述操作过程`);
+
     parts.push(MEMORY_UPDATE_SUFFIX);
     const fullPrompt = parts.join("\n\n---\n\n");
 
     const existingSession = getSessionId(chatId);
 
-    // Mark as active
+    // Mark as active, clear old progress card ID (new message gets its own card)
     const sessionEntry = chatSessions.get(chatId);
     if (sessionEntry) {
       sessionEntry.active = true;
       sessionEntry.chatId = chatId;
+      sessionEntry.progressMsgId = undefined;
       persistSessions();
     }
+
+    // 从 prompt 首行截取任务标题，供进度卡片头部显示（递归恢复时不覆盖标题）
+    const taskTitle = depth === 0
+      ? prompt.replace(/\n[\s\S]*/u, "").trim().slice(0, 20) || undefined
+      : undefined;
 
     const { reply, sessionId: newSessionId, aborted } = await executeClaudeWithProgress(
       fullPrompt,
       { sessionId: existingSession, logTag: chatId.slice(0, 16), chatId },
       {
         chatId,
-        initialProgressMsgId: sessionEntry?.progressMsgId,
+        initialProgressMsgId: undefined,
         replyToMsgId: messageId,
+        taskTitle,
       }
     );
 
@@ -541,10 +567,7 @@ async function processMessage(
 
       // Don't release lock, recurse (outermost finally releases)
       await processMessage(chatId, chatType, chatName, undefined,
-        "你正在执行任务时，用户发送了新消息。请查看群聊最近消息记录中用户的新消息，然后自行判断：\n" +
-        "- 如果新消息与当前任务相关（补充信息、修改方向、取消任务等），请据此调整并继续\n" +
-        "- 如果新消息是一个全新的、无关的任务，请先完成当前任务，再处理新任务\n" +
-        "- 如果用户明确要求取消或停止当前任务，就停下来",
+        "用户在你执行任务时发送了新消息。查看最近群消息，判断是否需要调整当前任务方向。如果用户明确要求停止或取消，就停下来；否则继续。",
         sender, depth + 1);
       return;
     }
