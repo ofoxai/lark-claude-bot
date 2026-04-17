@@ -297,7 +297,8 @@ async function executeClaudeWithProgress(
           if (s) { s.progressMsgId = progressMsgId; persistSessions(); }
         }
       } else {
-        await updateProgressCard(progressMsgId, md);
+        const ok = await updateProgressCard(progressMsgId, md);
+        if (!ok) progressCardFailed = true;
       }
     } catch (err) {
       console.error("[handler] Progress update failed:", (err as Error).message);
@@ -346,18 +347,19 @@ async function executeClaudeWithProgress(
 
   // Send final result
   if (progressMsgId) {
-    try {
-      const titleSection = ctx.taskTitle ? `**${sanitizeOutput(ctx.taskTitle)}**\n\n` : "";
-      const todoSection = currentTodos.length > 0
-        ? currentTodos.map((t) => {
-            const icon = t.status === "completed" ? "✅"
-              : t.status === "in_progress" ? "🔄" : "⬜";
-            return `${icon} ${sanitizeOutput(t.content)}`;
-          }).join("\n") + "\n\n"
-        : "";
-      await updateProgressCard(progressMsgId, titleSection + todoSection + reply);
-    } catch {
-      try { await sendCard(ctx.chatId, reply); } catch { /* give up */ }
+    const titleSection = ctx.taskTitle ? `**${sanitizeOutput(ctx.taskTitle)}**\n\n` : "";
+    const todoSection = currentTodos.length > 0
+      ? currentTodos.map((t) => {
+          const icon = t.status === "completed" ? "✅"
+            : t.status === "in_progress" ? "🔄" : "⬜";
+          return `${icon} ${sanitizeOutput(t.content)}`;
+        }).join("\n") + "\n\n"
+      : "";
+    const updated = await updateProgressCard(progressMsgId, titleSection + todoSection + reply);
+    if (!updated) {
+      try { await sendCard(ctx.chatId, reply, undefined, ctx.replyToMsgId); } catch {
+        try { await sendCard(ctx.chatId, reply); } catch { /* give up */ }
+      }
     }
   } else {
     try {
