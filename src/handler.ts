@@ -242,6 +242,77 @@ function releaseChatLock(chatId: string): void {
   chatLocks.delete(chatId);
 }
 
+// ==================== Reaction emoji names ====================
+
+const REACTION_QUEUED = "Wait";
+const REACTION_WORKING = "OnIt";
+const REACTION_DONE = "Done";
+
+// ==================== Message queue ====================
+
+interface QueuedMessage {
+  chatId: string;
+  chatType: string;
+  chatName: string;
+  messageId?: string;
+  prompt: string;
+  sender: string;
+  queuedReactionId?: string;
+}
+
+const messageQueues = new Map<string, QueuedMessage[]>();
+const MAX_QUEUE_SIZE = 10;
+
+// Admin interrupts pre-add a Working reaction to the new message; the resumed
+// processMessage takes ownership so the Working→Done (or remove) lifecycle stays
+// tied to the actual worker, not the handler that caught the interrupt.
+const pendingInterruptReaction = new Map<string, { messageId: string; reactionId: string }>();
+
+function enqueueMessage(m: QueuedMessage): boolean {
+  const q = messageQueues.get(m.chatId) ?? [];
+  if (q.length >= MAX_QUEUE_SIZE) return false;
+  q.push(m);
+  messageQueues.set(m.chatId, q);
+  return true;
+}
+
+function dequeueMessage(chatId: string): QueuedMessage | undefined {
+  const q = messageQueues.get(chatId);
+  if (!q || q.length === 0) return undefined;
+  const m = q.shift()!;
+  if (q.length === 0) messageQueues.delete(chatId);
+  return m;
+}
+
+function requeueFront(m: QueuedMessage): void {
+  const q = messageQueues.get(m.chatId) ?? [];
+  q.unshift(m);
+  messageQueues.set(m.chatId, q);
+}
+
+/**
+ * Drain the next queued message for a chat, fire-and-forget.
+ * Any path that releases a chat lock must call this, otherwise queued
+ * messages sit forever.
+ */
+function drainChatQueue(chatId: string): void {
+  const next = dequeueMessage(chatId);
+  if (!next) return;
+  setImmediate(() => {
+    if (!acquireChatLock(next.chatId)) {
+      // A fresh message beat us to the lock — put this one back at the front
+      // so the next release will retry.
+      requeueFront(next);
+      return;
+    }
+    processMessage(
+      next.chatId, next.chatType, next.chatName,
+      next.messageId, next.prompt, next.sender, 0,
+      next.queuedReactionId,
+    ).catch(e => console.error("[queue drain]", e));
+  });
+}
+
 // ==================== Shared: Claude execution + progress card ====================
 
 interface ProgressContext {
@@ -452,6 +523,7 @@ async function resumeSession(chatId: string, entry: SessionEntry): Promise<void>
     try { await sendText(chatId, "任务恢复失败，请重新发送指令。"); } catch { /* ignore */ }
   } finally {
     releaseChatLock(chatId);
+    drainChatQueue(chatId);
   }
 }
 
@@ -488,19 +560,36 @@ export async function handleMessage(
     ((data.sender as Record<string, unknown>)?.sender_id as Record<string, unknown>)
       ?.open_id as string || "unknown";
 
-  // If currently processing: admin can interrupt, others wait
+  // If currently processing: admin can interrupt (rate-limited); otherwise enqueue.
   if (!acquireChatLock(chatId)) {
     const adminOpenId = config.bot.adminOpenId;
     if (adminOpenId && senderId === adminOpenId && shouldAllowInterrupt(chatId)) {
       console.log(`[interrupt] ${chatId.slice(0, 12)} admin interrupt, injecting new message`);
       abortClaude(chatId);
-      await addReaction(messageId, "OnIt");
-    } else if (adminOpenId && senderId === adminOpenId) {
-      await sendText(chatId, "中断太频繁，请等当前任务完成。");
-    } else {
-      await sendText(chatId, `${config.bot.name} 正在处理任务中，请稍候。`);
+      if (messageId) {
+        const rxId = await addReaction(messageId, REACTION_WORKING);
+        if (rxId) {
+          // Clear any prior pending interrupt reaction so we don't leak Working emojis
+          const old = pendingInterruptReaction.get(chatId);
+          if (old) await removeReaction(old.messageId, old.reactionId);
+          pendingInterruptReaction.set(chatId, { messageId, reactionId: rxId });
+        }
+      }
+      return;
     }
-    // Message is already saved via storeMessage; abort+resume will pick it up
+    // Queue: add Wait reaction; drained after the current task finishes.
+    const waitReactionId = messageId ? await addReaction(messageId, REACTION_QUEUED) : undefined;
+    const enqueued = enqueueMessage({
+      chatId, chatType, chatName, messageId, prompt, sender: senderId,
+      queuedReactionId: waitReactionId,
+    });
+    if (!enqueued) {
+      if (waitReactionId && messageId) await removeReaction(messageId, waitReactionId);
+      await sendText(chatId, `${config.bot.name} 队列已满，请稍后再试。`);
+      console.log(`[queue] ${chatId.slice(0, 12)} queue full (${MAX_QUEUE_SIZE}), dropping message`);
+    } else {
+      console.log(`[queue] ${chatId.slice(0, 12)} enqueued (size=${messageQueues.get(chatId)?.length ?? 0})`);
+    }
     return;
   }
 
@@ -514,9 +603,19 @@ async function processMessage(
   messageId: string | undefined,
   prompt: string,
   sender: string,
-  depth: number
+  depth: number,
+  queuedReactionId?: string,
+  preAddedReactionId?: string
 ): Promise<void> {
-  const reactionId = messageId ? await addReaction(messageId, "OnIt") : undefined;
+  // Dequeued message: drop the Wait reaction before replacing it with Working
+  if (queuedReactionId && messageId) {
+    await removeReaction(messageId, queuedReactionId);
+  }
+  // Admin interrupt already added Working to the new message; reuse it rather
+  // than stacking a second reaction.
+  let reactionId: string | undefined = preAddedReactionId
+    ?? (messageId ? await addReaction(messageId, REACTION_WORKING) : undefined);
+  let succeeded = false;
 
   try {
     const chatCtx = buildChatContext(chatId, 30);
@@ -574,24 +673,41 @@ async function processMessage(
     if (aborted) {
       if (reactionId && messageId) {
         await removeReaction(messageId, reactionId);
+        reactionId = undefined; // prevent the finally block removing it again
       }
 
+      // Hand the pre-added Working reaction on the interrupting message off to
+      // the recursive call, which will carry it through to Done / remove.
+      const pending = pendingInterruptReaction.get(chatId);
+      pendingInterruptReaction.delete(chatId);
+
       if (!newSessionId) {
-        // Aborted too early, no session ID yet — start a new session
         console.log(`[interrupt] ${chatId.slice(0, 12)} abort with no sessionId, starting new session`);
       } else if (depth >= MAX_RESUME_DEPTH) {
         console.log(`[interrupt] ${chatId.slice(0, 12)} max resume depth ${MAX_RESUME_DEPTH} reached, stopping`);
+        if (pending) await removeReaction(pending.messageId, pending.reactionId);
         await sendText(chatId, "收到你的消息了，等当前工作告一段落后处理。");
         return;
       } else {
         console.log(`[interrupt] ${chatId.slice(0, 12)} aborted, resuming session ${newSessionId.slice(0, 8)} (depth=${depth + 1})`);
       }
 
-      // Don't release lock, recurse (outermost finally releases)
-      await processMessage(chatId, chatType, chatName, undefined,
+      // Don't release lock, recurse (outermost finally releases + drains queue)
+      await processMessage(chatId, chatType, chatName,
+        pending?.messageId,
         "用户在你执行任务时发送了新消息。查看最近群消息，判断是否需要调整当前任务方向。如果用户明确要求停止或取消，就停下来；否则继续。",
-        sender, depth + 1);
+        sender, depth + 1,
+        undefined,
+        pending?.reactionId);
       return;
+    }
+
+    // Race: abort signal arrived late but the task finished naturally.
+    // Clean up any leftover Working reaction on the interrupting message.
+    const staleInterrupt = pendingInterruptReaction.get(chatId);
+    if (staleInterrupt) {
+      pendingInterruptReaction.delete(chatId);
+      await removeReaction(staleInterrupt.messageId, staleInterrupt.reactionId);
     }
 
     storeMessage({
@@ -617,6 +733,8 @@ async function processMessage(
       response: reply.slice(0, 500),
       timestamp: new Date().toISOString(),
     });
+
+    succeeded = true;
   } catch (err) {
     console.error("[handler] Error:", err);
     const s = chatSessions.get(chatId);
@@ -625,9 +743,21 @@ async function processMessage(
       await sendText(chatId, "处理消息时出现错误，请稍后再试");
     } catch { /* give up */ }
   } finally {
-    releaseChatLock(chatId);
-    if (reactionId && messageId) {
-      await removeReaction(messageId, reactionId);
+    // Working → Done on success; just remove Working on failure/abort.
+    if (messageId) {
+      if (reactionId) {
+        await removeReaction(messageId, reactionId);
+      }
+      if (succeeded) {
+        await addReaction(messageId, REACTION_DONE);
+      }
+    }
+
+    // Only the outermost call releases the lock and drains the queue — recursive
+    // calls run inside the same lock scope.
+    if (depth === 0) {
+      releaseChatLock(chatId);
+      drainChatQueue(chatId);
     }
   }
 }
