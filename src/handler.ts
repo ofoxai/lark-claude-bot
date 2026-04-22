@@ -18,11 +18,30 @@ import { readFileSync, writeFileSync, renameSync } from "fs";
 import { join } from "path";
 import { config } from "./config.js";
 
-function extractText(content: string): string {
+type Mention = { key: string; name: string };
+
+/**
+ * Replace Lark mention placeholders (e.g. `@_user_1`) with the actual user name,
+ * so Claude reads `@Alice` instead of an opaque token. Falls back to stripping
+ * the placeholder if the mention list is missing or doesn't match.
+ */
+function resolveMentions(text: string, mentions: Mention[] | undefined): string {
+  if (!mentions?.length) return text.replace(/@_user_\w+\s*/g, "");
+  let result = text;
+  for (const m of mentions) {
+    if (!m.key) continue;
+    const escaped = m.key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    result = result.replace(new RegExp(escaped, "g"), `@${m.name ?? ""}`);
+  }
+  // Strip any remaining @_user_ placeholders that weren't in the mentions array
+  return result.replace(/@_user_\w+\s*/g, "");
+}
+
+function extractText(content: string, mentions?: Mention[]): string {
   try {
     const obj = JSON.parse(content);
     const text: string = obj.text || "";
-    return text.replace(/@_user_\w+\s*/g, "").trim();
+    return resolveMentions(text, mentions).trim();
   } catch {
     return content;
   }
@@ -38,10 +57,11 @@ async function buildPromptFromMessage(
   message: Record<string, unknown>
 ): Promise<string> {
   const messageId = message.message_id as string;
+  const mentions = message.mentions as Mention[] | undefined;
 
   switch (msgType) {
     case "text":
-      return extractText(content);
+      return extractText(content, mentions);
 
     case "post": {
       try {
@@ -52,7 +72,7 @@ async function buildPromptFromMessage(
           if (!Array.isArray(line)) continue;
           for (const item of line) {
             if (item.tag === "text") {
-              const text = (item.text || "").replace(/@_user_\w+\s*/g, "").trim();
+              const text = resolveMentions(item.text || "", mentions).trim();
               if (text) parts.push(text);
             } else if (item.tag === "img" && item.image_key) {
               const savePath = `/tmp/lark_img_${item.image_key}.png`;
