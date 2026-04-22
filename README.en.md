@@ -79,6 +79,7 @@ npm run dev
 | `LARK_APP_ID` | Yes | Lark app ID |
 | `LARK_APP_SECRET` | Yes | Lark app secret |
 | `LARK_ENCRYPT_KEY` | No | Event encryption key |
+| `LARK_DOMAIN` | No | Set to `feishu` to use domestic Feishu endpoints; defaults to international Lark |
 | `BOT_NAME` | No | Bot display name (default: `Marvin`) |
 | `ADMIN_OPEN_ID` | No | Admin's open_id for interrupt permission control |
 | `CLAUDE_CWD` | No | Working directory for Claude Code (default: project root) |

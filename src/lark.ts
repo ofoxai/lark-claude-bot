@@ -3,10 +3,12 @@ import fs from "fs";
 import { config } from "./config.js";
 
 // Lark Client — SDK manages token automatically
+// Supports LARK_DOMAIN=feishu for domestic Feishu tenants
+const domain = process.env.LARK_DOMAIN === "feishu" ? lark.Domain.Feishu : lark.Domain.Lark;
 export const client = new lark.Client({
   appId: config.lark.appId,
   appSecret: config.lark.appSecret,
-  domain: lark.Domain.Lark,
+  domain,
   loggerLevel: lark.LoggerLevel.info,
 });
 
@@ -125,7 +127,7 @@ export async function sendProgressCard(
 export async function updateProgressCard(
   messageId: string,
   markdown: string
-): Promise<void> {
+): Promise<boolean> {
   const card = {
     schema: "2.0",
     config: { update_multi: true },
@@ -139,8 +141,10 @@ export async function updateProgressCard(
       path: { message_id: messageId },
       data: { content: JSON.stringify(card) },
     });
+    return true;
   } catch (err) {
     console.error("[lark] updateProgressCard failed:", (err as Error).message);
+    return false;
   }
 }
 
