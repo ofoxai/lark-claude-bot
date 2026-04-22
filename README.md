@@ -79,6 +79,7 @@ npm run dev
 | `LARK_APP_ID` | 是 | Lark 应用 ID |
 | `LARK_APP_SECRET` | 是 | Lark 应用 Secret |
 | `LARK_ENCRYPT_KEY` | 否 | 事件加密密钥 |
+| `LARK_DOMAIN` | 否 | 设为 `feishu` 切换国内飞书域名，默认使用国际版 Lark |
 | `BOT_NAME` | 否 | 机器人显示名称（默认 `Marvin`） |
 | `ADMIN_OPEN_ID` | 否 | 管理员的 open_id，用于中断权限控制 |
 | `CLAUDE_CWD` | 否 | Claude Code 工作目录（默认项目根目录） |

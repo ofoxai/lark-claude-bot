@@ -3,10 +3,12 @@ import fs from "fs";
 import { config } from "./config.js";
 
 // Lark Client — SDK manages token automatically
+// Supports LARK_DOMAIN=feishu for domestic Feishu tenants
+const domain = process.env.LARK_DOMAIN === "feishu" ? lark.Domain.Feishu : lark.Domain.Lark;
 export const client = new lark.Client({
   appId: config.lark.appId,
   appSecret: config.lark.appSecret,
-  domain: lark.Domain.Lark,
+  domain,
   loggerLevel: lark.LoggerLevel.info,
 });
 

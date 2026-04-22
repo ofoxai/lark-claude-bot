@@ -24,36 +24,47 @@ const eventDispatcher = new lark.EventDispatcher({
 const MAX_CONSECUTIVE_FAILURES = 5;
 const FAILURE_BACKOFF_MS = 3 * 60 * 1000; // 3 minutes before exit
 
+function safeStringify(msg: unknown[]): string {
+  try {
+    return JSON.stringify(msg);
+  } catch {
+    return msg.map((m) => (typeof m === "string" ? m : String(m))).join(" ");
+  }
+}
+
 function makeWsLogger() {
   let consecutiveFailures = 0;
-  let backingOff = false;
+  let exitTimer: ReturnType<typeof setTimeout> | undefined;
 
   return {
     error: (...msg: unknown[]) => {
       console.error("[error]:", msg);
-      const msgStr = JSON.stringify(msg);
+      const msgStr = safeStringify(msg);
       const isSystemBusy = msgStr.includes("system busy");
-      if (isSystemBusy && !backingOff) {
+      if (isSystemBusy && !exitTimer) {
         consecutiveFailures++;
         console.warn(
           `[ws] consecutive connection failures: ${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}`
         );
         if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-          backingOff = true;
           console.warn(
             `[ws] too many failures, waiting ${FAILURE_BACKOFF_MS / 1000}s then exiting for pm2 restart`
           );
-          setTimeout(() => process.exit(1), FAILURE_BACKOFF_MS);
+          exitTimer = setTimeout(() => process.exit(1), FAILURE_BACKOFF_MS);
         }
       }
     },
     warn: (...msg: unknown[]) => console.warn("[warn]:", msg),
     info: (...msg: unknown[]) => {
       console.info("[info]:", msg);
-      const isReady = JSON.stringify(msg).includes("ws client ready");
+      const isReady = safeStringify(msg).includes("ws client ready");
       if (isReady) {
         consecutiveFailures = 0;
-        backingOff = false;
+        if (exitTimer) {
+          clearTimeout(exitTimer);
+          exitTimer = undefined;
+          console.log("[ws] connection recovered, cancelled scheduled exit");
+        }
       }
     },
     debug: (...msg: unknown[]) => console.debug("[debug]:", msg),
